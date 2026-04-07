@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.0 | **Last Updated:** 2026-07-04
+> **Version:** 1.1 | **Last Updated:** 2026-07-04
 
 ---
 
