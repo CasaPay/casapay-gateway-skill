@@ -24,6 +24,51 @@
 
 ---
 
+## Setup for AI Code Editors
+
+Add this skill to your AI assistant so it can help you integrate CasaPay Gateway correctly.
+
+### Claude Code
+
+```bash
+# Add as a skill file
+claude skill add https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
+```
+
+Or manually: copy the contents of this file into your project's `CLAUDE.md` or `.claude/skills/` directory.
+
+### Cursor
+
+Add to your project's `.cursor/rules` file:
+
+```
+@file https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
+```
+
+Or place this file in your project root as `.cursor/rules/casapay-gateway.md`.
+
+### GitHub Copilot
+
+Add to your `.github/copilot-instructions.md`:
+
+```markdown
+## CasaPay Gateway Integration
+When implementing CasaPay Gateway integration, follow the guide at:
+https://github.com/CasaPay/casapay-gateway-skill
+```
+
+### Windsurf / Codeium
+
+Place this file in your project as `.windsurf/rules/casapay-gateway.md` or reference it in your workspace context.
+
+### Any AI Editor (Generic)
+
+1. Download: `curl -O https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md`
+2. Place in your project's docs or AI context directory
+3. Reference it when asking your AI to implement CasaPay Gateway
+
+---
+
 ## Core Concept
 
 CasaPay Gateway is a **Stripe-style hosted checkout** for property/rental payments. It handles:
