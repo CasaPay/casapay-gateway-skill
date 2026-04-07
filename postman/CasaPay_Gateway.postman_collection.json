@@ -1,0 +1,345 @@
+{
+	"info": {
+		"name": "CasaPay Gateway API",
+		"description": "CasaPay Gateway operator API — **Guarantee flow** (no tenant choice, deposit always covered by CasaPay Guarantee).\n\n## Setup\n1. Set `base_url` to your API URL (e.g. `https://api.casapay.com/api/v1`)\n2. Set `api_secret` to your test key (`sk_test_...`)\n3. Run requests in order — variables auto-populate between requests\n\n## Flow\n1. **Pricing Preview** — See guarantee subscription costs + rent fees\n2. **Create Session** — Onboard tenant: guarantee deposit + first rent\n3. **Get Session** — Poll until completed, grab `payment_agreement_id`\n4. **Follow-up Invoices** — Monthly rent invoices on the existing agreement",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{api_secret}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://manage.test.casapay.com/api/v1"
+		},
+		{
+			"key": "api_secret",
+			"value": "sk_test_your_key_here"
+		},
+		{
+			"key": "session_id",
+			"value": ""
+		},
+		{
+			"key": "payment_agreement_id",
+			"value": ""
+		},
+		{
+			"key": "gateway_url",
+			"value": ""
+		}
+	],
+	"item": [
+		{
+			"name": "1. Pricing Preview",
+			"description": "Insurance-style calculator. Returns both deposit options (upfront vs guaranteed) so the frontend can show a side-by-side comparison.",
+			"item": [
+				{
+					"name": "1.1 Calculate Deposit Options",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var json = pm.response.json();",
+									"    var upfront = json.deposit_options[0];",
+									"    var guaranteed = json.deposit_options[1];",
+									"    ",
+									"    pm.test('Two deposit options returned', function() {",
+									"        pm.expect(json.deposit_options).to.have.lengthOf(2);",
+									"        pm.expect(upfront.mode).to.eql('deposit_upfront');",
+									"        pm.expect(guaranteed.mode).to.eql('deposit_guaranteed');",
+									"    });",
+									"    ",
+									"    pm.test('Guaranteed option has no deposit', function() {",
+									"        pm.expect(guaranteed.deposit_amount).to.eql(0);",
+									"    });",
+									"    ",
+									"    pm.test('Guaranteed due_today < upfront due_today', function() {",
+									"        pm.expect(guaranteed.due_today).to.be.below(upfront.due_today);",
+									"    });",
+									"    ",
+									"    console.log('Cover amount: ' + json.cover_amount + ' ' + json.currency);",
+									"    console.log('');",
+									"    console.log('--- Option A: Pay deposit upfront ---');",
+									"    console.log('Deposit: ' + upfront.deposit_amount);",
+									"    console.log('First rent: ' + upfront.first_payment_amount);",
+									"    console.log('Due today: ' + upfront.due_today);",
+									"    console.log('');",
+									"    console.log('--- Option B: CasaPay Guarantee ---');",
+									"    console.log('Deposit: ' + guaranteed.deposit_amount + ' (covered!)');",
+									"    console.log('First rent: ' + guaranteed.first_payment_amount);",
+									"    console.log('Subscription: ' + guaranteed.subscription.monthly_amount + '/mo or ' + guaranteed.subscription.annual_amount + '/yr');",
+									"    console.log('Due today: ' + guaranteed.due_today + ' (rent + first month sub)');",
+									"    console.log('');",
+									"    console.log('Tenant saves: ' + (upfront.due_today - guaranteed.due_today).toFixed(2) + ' today');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"cover_amount\": 1100.00,\n    \"first_payment_amount\": 200.00,\n    \"currency\": \"EUR\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/gateway/pricing-preview",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "pricing-preview"]
+						},
+						"description": "Returns both deposit options side by side:\n\n**Option A — `deposit_upfront`:** Tenant pays full deposit + rent today.\n\n**Option B — `deposit_guaranteed`:** Deposit covered by CasaPay. Tenant pays rent + first month subscription today.\n\nThe frontend renders these as a comparison card so the tenant can choose."
+					}
+				}
+			]
+		},
+		{
+			"name": "2. Create Guarantee Session",
+			"description": "Onboard a new tenant with CasaPay Guarantee deposit + first rent payment.\n\nThe tenant goes through: verification (if configured) → payment.\n\nOnce the session is completed, the response includes `payment_agreement_id` — store this on your side, it is required for creating follow-up invoices (folder 3).",
+			"item": [
+				{
+					"name": "2.1 Create Session",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var json = pm.response.json();",
+									"    pm.collectionVariables.set('session_id', json.session_id);",
+									"    pm.collectionVariables.set('gateway_url', json.gateway_url);",
+									"    ",
+									"    pm.test('Session created', function() {",
+									"        pm.expect(json.session_id).to.match(/^gwy_/);",
+									"        pm.expect(json.status).to.eql('pending');",
+									"        pm.expect(json.deposit_mode).to.eql('deposit_guaranteed');",
+									"    });",
+									"    ",
+									"    console.log('Session: ' + json.session_id);",
+									"    console.log('Gateway URL: ' + json.gateway_url);",
+									"    console.log('Deposit: ' + json.cover_amount + ' EUR (guarantee)');",
+									"    console.log('First rent: ' + json.first_payment_amount + ' EUR');",
+									"    console.log('');",
+									"    console.log('Send the gateway_url to the tenant.');",
+									"    console.log('Then poll status with request 2.2.');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"tenant\": {\n        \"email\": \"john.doe@example.com\",\n        \"first_name\": \"John\",\n        \"last_name\": \"Doe\",\n        \"phone\": \"+3725551234\"\n    },\n    \"cover_amount\": 3000.00,\n    \"deposit_mode\": \"deposit_guaranteed\",\n    \"agreement_type\": \"guarantor\",\n    \"first_payment_amount\": 850.00,\n    \"first_payment_description\": \"February 2026 rent\",\n    \"success_url\": \"https://example.com/success\",\n    \"cancel_url\": \"https://example.com/cancel\",\n    \"metadata\": {\n        \"property_id\": \"prop_123\",\n        \"lease_start\": \"2026-03-01\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/gateway/sessions",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "sessions"]
+						},
+						"description": "Creates a guarantee gateway session.\n\n**`deposit_mode: \"deposit_guaranteed\"`** — the deposit is covered by CasaPay Guarantee. The tenant does NOT pay the deposit in cash. They only pay the first rent.\n\n**Tenant flow:**\n1. If CasaPay has configured KYC verification (ID verification, income check, or other validations) for this entity, the tenant will be guided through those steps first.\n2. Pay first rent + tenant service fee (card or bank via EveryPay)\n3. Done — CasaPay Guarantee activates, tenant gets a subscription\n\nVerification steps are configured per entity by CasaPay. The operator does not need to manage this — the gateway handles it automatically based on the entity's configuration.\n\nWith `sk_test_*` key, the simulator payment method is available for testing."
+					}
+				},
+				{
+					"name": "2.2 Get Session Status",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var json = pm.response.json();",
+									"",
+									"pm.test('Session retrieved', function() {",
+									"    pm.expect(json.session_id).to.eql(pm.collectionVariables.get('session_id'));",
+									"});",
+									"",
+									"console.log('Status: ' + json.status);",
+									"console.log('Step: ' + (json.current_step || 'done'));",
+									"",
+									"if (json.tenant) {",
+									"    console.log('Tenant: ' + json.tenant.first_name + ' ' + json.tenant.last_name + ' (' + json.tenant.verification_status + ')');",
+									"}",
+									"",
+									"if (json.guarantee) {",
+									"    console.log('Guarantee: ' + json.guarantee.status + ' (covers ' + json.guarantee.covered_amount + ' EUR)');",
+									"}",
+									"",
+									"if (json.payment_agreement_id) {",
+									"    pm.collectionVariables.set('payment_agreement_id', json.payment_agreement_id);",
+									"    console.log('');",
+									"    console.log('Payment Agreement ID: ' + json.payment_agreement_id);",
+									"    console.log('Use this for follow-up invoices (folder 3).');",
+									"} else {",
+									"    console.log('');",
+									"    console.log('Waiting for tenant to complete checkout...');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/gateway/sessions/{{session_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "sessions", "{{session_id}}"]
+						},
+						"description": "Poll session status after sending the gateway URL to the tenant.\n\n**Statuses:**\n- `pending` — waiting for tenant\n- `processing` — tenant is in checkout\n- `completed` — done! `payment_agreement_id` is available\n- `expired` / `cancelled` / `failed`\n\nOnce completed, the response includes:\n- `payment_agreement_id` — use for follow-up invoices\n- `guarantee.status` — should be `active`\n- `guarantee.covered_amount` — the deposit amount covered\n- `tenant.verification_status` — should be `verified`"
+					}
+				},
+				{
+					"name": "2.3 Cancel Session",
+					"request": {
+						"method": "POST",
+						"url": {
+							"raw": "{{base_url}}/gateway/sessions/{{session_id}}/cancel",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "sessions", "{{session_id}}", "cancel"]
+						},
+						"description": "Cancel an active session before the tenant completes it."
+					}
+				}
+			]
+		},
+		{
+			"name": "3. Monthly Rent Invoices",
+			"description": "After the guarantee session completes, use the `payment_agreement_id` to send monthly rent invoices.\n\nNo tenant data, no verification, no deposit — just amount + description.\nThe tenant clicks the gateway link and pays.",
+			"item": [
+				{
+					"name": "3.1 Create Rent Invoice",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var json = pm.response.json();",
+									"    pm.collectionVariables.set('session_id', json.session_id);",
+									"    pm.collectionVariables.set('gateway_url', json.gateway_url);",
+									"    ",
+									"    pm.test('Invoice session created', function() {",
+									"        pm.expect(json.session_id).to.match(/^gwy_/);",
+									"        pm.expect(json.payment_agreement_id).to.eql(",
+									"            parseInt(pm.collectionVariables.get('payment_agreement_id'))",
+									"        );",
+									"    });",
+									"    ",
+									"    console.log('Invoice session: ' + json.session_id);",
+									"    console.log('Gateway URL: ' + json.gateway_url);",
+									"    console.log('Tenant: ' + json.tenant.first_name + ' ' + json.tenant.last_name + ' (' + json.tenant.email + ')');",
+									"    console.log('Amount: ' + json.amount + ' ' + json.currency);",
+									"    console.log('');",
+									"    console.log('Send the gateway_url to the tenant.');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"amount\": 850.00,\n    \"description\": \"March 2026 rent\",\n    \"document_url\": \"https://example.com/invoices/march-2026.pdf\",\n    \"success_url\": \"https://example.com/success\",\n    \"cancel_url\": \"https://example.com/cancel\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/gateway/agreements/{{payment_agreement_id}}/invoice",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "agreements", "{{payment_agreement_id}}", "invoice"]
+						},
+						"description": "Create a rent invoice on the existing agreement.\n\n**Required:** `amount`, `success_url`, `cancel_url`\n**Optional:** `description`, `document_url`, `metadata`\n\n`document_url` — the API fetches and stores the PDF when the request is made. If the URL is unreachable, the request fails with 422.\n\nThe tenant clicks the gateway URL → sees amount + optional PDF → pays → done."
+					}
+				},
+				{
+					"name": "3.2 Create Rent Invoice (Minimal)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var json = pm.response.json();",
+									"    pm.collectionVariables.set('session_id', json.session_id);",
+									"    pm.collectionVariables.set('gateway_url', json.gateway_url);",
+									"    console.log('Invoice session: ' + json.session_id);",
+									"    console.log('Gateway URL: ' + json.gateway_url);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"amount\": 850.00,\n    \"description\": \"April 2026 rent\",\n    \"success_url\": \"https://example.com/success\",\n    \"cancel_url\": \"https://example.com/cancel\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/gateway/agreements/{{payment_agreement_id}}/invoice",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "agreements", "{{payment_agreement_id}}", "invoice"]
+						},
+						"description": "Minimal rent invoice — no document attached."
+					}
+				},
+				{
+					"name": "3.3 Check Invoice Status",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var json = pm.response.json();",
+									"",
+									"console.log('Status: ' + json.status);",
+									"console.log('Amount: ' + json.amount + ' ' + json.currency);",
+									"",
+									"if (json.payment) {",
+									"    console.log('Paid at: ' + json.payment.paid_at);",
+									"    console.log('Method: ' + json.payment.payment_method);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/gateway/sessions/{{session_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "sessions", "{{session_id}}"]
+						},
+						"description": "Check if the tenant has paid the invoice."
+					}
+				}
+			]
+		}
+	]
+}
