@@ -1552,6 +1552,49 @@ test "success_url_does_not_fulfill_order":
 
 ---
 
+## Auto-Update (AI Agents)
+
+This skill file includes a version check mechanism. AI agents should periodically verify they have the latest version.
+
+**Current Version:** `1.3`
+**Version Check URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION`
+**Full Skill URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md`
+
+### For AI Agents: Self-Update Instructions
+
+When starting a new CasaPay Gateway integration task, or if more than 7 days have passed since last check:
+
+1. **Check for updates** by fetching the VERSION file:
+   ```
+   curl -s https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION
+   ```
+2. **Compare** the remote version with the version in this file header (`Version: 1.3`)
+3. **If newer version exists**, download and replace this file:
+   ```
+   curl -s -o <path-to-this-file> https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
+   ```
+4. **Notify the developer** that the skill was updated
+
+### For CI/CD: Automated Update Script
+
+```bash
+#!/bin/bash
+# Check and update CasaPay Gateway skill file
+SKILL_PATH=".cursor/rules/casapay-gateway.md"  # or wherever you store it
+REMOTE_VERSION=$(curl -s https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION 2>/dev/null)
+LOCAL_VERSION=$(grep -oP 'Version:\s*\K[\d.]+' "$SKILL_PATH" 2>/dev/null)
+
+if [[ "$REMOTE_VERSION" != "$LOCAL_VERSION" && -n "$REMOTE_VERSION" ]]; then
+    echo "🔄 CasaPay Gateway skill update available: $LOCAL_VERSION → $REMOTE_VERSION"
+    curl -s -o "$SKILL_PATH" https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
+    echo "✅ Updated to v$REMOTE_VERSION"
+else
+    echo "✅ CasaPay Gateway skill is up to date (v$LOCAL_VERSION)"
+fi
+```
+
+---
+
 ## Support
 
 For API keys, webhook configuration, or technical questions, visit [casapay.com](https://casapay.com) or reach out to your CasaPay integration contact.
