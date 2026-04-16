@@ -221,6 +221,51 @@
 			]
 		},
 		{
+			"name": "2b. Agreement Details",
+			"description": "After a session completes and creates a PaymentAgreement, use this to fetch agreement details like email_alias, coverage_amount, type, and status.",
+			"item": [
+				{
+					"name": "2b.1 Get Agreement Details",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var json = pm.response.json();",
+									"",
+									"pm.test('Agreement found', function() {",
+									"    pm.response.to.have.status(200);",
+									"    pm.expect(json.id).to.be.a('number');",
+									"    pm.expect(json.email_alias).to.be.a('string');",
+									"});",
+									"",
+									"console.log('Agreement: ' + json.agreement_title);",
+									"console.log('Type: ' + json.agreement_type);",
+									"console.log('Status: ' + json.status);",
+									"console.log('Email Alias: ' + json.email_alias);",
+									"console.log('Coverage: ' + (json.coverage_amount || 'N/A') + ' ' + json.currency);",
+									"console.log('Period: ' + json.agreement_start + ' → ' + (json.agreement_end || 'ongoing'));",
+									"if (json.tenant) {",
+									"    console.log('Tenant: ' + json.tenant.first_name + ' ' + json.tenant.last_name + ' (' + json.tenant.email + ')');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/gateway/agreements/{{payment_agreement_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "agreements", "{{payment_agreement_id}}"]
+						},
+						"description": "Fetch agreement details including email alias, coverage amount, type, status, and dates.\n\n**Key fields:**\n- `email_alias` — the @casapay.me forwarding address for this agreement\n- `coverage_amount` — deposit/guarantee amount CasaPay covers (null for payment_link)\n- `agreement_type` — ontime, cover, or payment_link\n- `status` — draft, active, terminated, etc."
+					}
+				}
+			]
+		},
+		{
 			"name": "3. Monthly Rent Invoices",
 			"description": "After the guarantee session completes, use the `payment_agreement_id` to send monthly rent invoices.\n\nNo tenant data, no verification, no deposit — just amount + description.\nThe tenant clicks the gateway link and pays.",
 			"item": [

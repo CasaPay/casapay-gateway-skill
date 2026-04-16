@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.3 | **Last Updated:** 2026-07-16
+> **Version:** 1.4 | **Last Updated:** 2026-07-16
 
 ---
 
@@ -392,7 +392,50 @@ Creates a payment-only session on an existing active PaymentAgreement. No tenant
 
 ---
 
-### 3. Get Session Status
+### 3. Get Agreement Details
+
+```
+GET /api/v1/gateway/agreements/{paymentAgreementId}
+Authorization: Bearer sk_live_xxx
+```
+
+Retrieve details of a payment agreement created via the gateway. Only returns agreements belonging to your entity.
+
+#### Response `200 OK`
+
+```json
+{
+  "id": 123,
+  "agreement_id": "PA-20260311-ABC123",
+  "agreement_title": "Apartment 4B - John Doe",
+  "agreement_type": "ontime",
+  "status": "active",
+  "email_alias": "apt4b@casapay.me",
+  "currency": "EUR",
+  "coverage_amount": 2000.00,
+  "agreement_start": "2026-03-11",
+  "agreement_end": "2027-03-11",
+  "tenant": {
+    "id": 42,
+    "email": "john@example.com",
+    "first_name": "John",
+    "last_name": "Doe"
+  },
+  "created_at": "2026-03-11T12:00:00+00:00",
+  "updated_at": "2026-03-11T14:30:00+00:00"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `email_alias` | CasaPay email forwarding address (e.g. `apt4b@casapay.me`) — tenants send invoices here |
+| `coverage_amount` | The deposit/guarantee amount CasaPay covers (`null` for payment_link agreements) |
+| `agreement_type` | `ontime`, `cover`, or `payment_link` |
+| `status` | `draft`, `active`, `terminated`, etc. |
+
+---
+
+### 4. Get Session Status
 
 ```
 GET /api/v1/gateway/sessions/{session_id}
@@ -1517,6 +1560,11 @@ test "success_url_does_not_fulfill_order":
 │    POST /api/v1/gateway/agreements/{id}/invoice               │
 │    Auth: Bearer sk_live_xxx                                   │
 │    Body: { amount, success_url, cancel_url }                  │
+│                                                               │
+│  GET AGREEMENT:                                               │
+│    GET /api/v1/gateway/agreements/{id}                        │
+│    Auth: Bearer sk_live_xxx                                   │
+│    → email_alias, coverage_amount, type, status, dates        │
 │                                                               │
 │  GET SESSION:                                                 │
 │    GET /api/v1/gateway/sessions/{session_id}                  │
