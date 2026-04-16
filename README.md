@@ -1,8 +1,8 @@
-# CasaPay Gateway Integration Skill
+ # CasaPay Gateway Integration Skill
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.1 | **Last Updated:** 2026-07-04
+> **Version:** 1.3 | **Last Updated:** 2026-07-16
 
 ---
 
@@ -312,7 +312,7 @@ Content-Type: application/json
 | `tenant.personal_code` | string | ❌ | Customer personal/ID code |
 | `cover_amount` | number | ❌* | Deposit/guarantee amount (max: €15,000) |
 | `deposit_mode` | string | Required with `cover_amount` | `deposit_upfront`, `deposit_guaranteed`, or `choice` |
-| `agreement_type` | string | ❌ | `guarantor` (default) or `payment_link`. Controls what PaymentAgreement type is created |
+| `agreement_type` | string | ❌ | `ontime` (default), `cover`, or `payment_link`. Controls what PaymentAgreement type is created. `ontime` = immediate payout on due date. `cover` = payout delayed 30 days |
 | `first_payment_amount` | number | ❌* | First rent/payment amount |
 | `first_payment_description` | string | ❌ | Description for first payment line |
 | `amount` | number | ❌* | Legacy: single payment amount (no deposit split) |
@@ -499,11 +499,13 @@ Before creating a session, call `POST /pricing-preview` with `cover_amount` and 
 
 Behind the scenes, CasaPay creates different agreement types:
 
-| Type | Description | Created When |
-|------|-------------|-------------|
-| `guarantor` | Proactive guarantee — CasaPay pays operator immediately on invoice due date if tenant doesn't | Deposit mode = `guarantee` |
-| `cover` | Reactive guarantee — CasaPay pays after 30-day grace period | Future: when agreement_type = `cover` |
-| `payment_link` | No guarantee — just payment forwarding | Simple payment collection |
+| Type | Description | Created When | Payout Timing |
+|------|-------------|-------------|---------------|
+| `ontime` | Proactive guarantee — CasaPay pays operator on invoice due date | `agreement_type: "ontime"` (default) | Immediate (due date) |
+| `cover` | Reactive guarantee — CasaPay pays after 30-day grace period | `agreement_type: "cover"` | Due date + 30 days |
+| `payment_link` | No guarantee — just payment forwarding to operator | `agreement_type: "payment_link"` | Immediate (due date) |
+
+> **Note:** `guarantor` is a legacy type still present in the system for existing agreements but is **not accepted** by the Gateway API. Use `ontime` instead.
 
 ---
 
