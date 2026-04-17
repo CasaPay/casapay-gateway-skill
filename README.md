@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.4 | **Last Updated:** 2026-07-16
+> **Version:** 1.5 | **Last Updated:** 2026-07-17
 
 ---
 
@@ -209,6 +209,29 @@ function wait_for_session_completion(session_id, max_attempts=60):
 | **Reliability** | You control retries | CasaPay handles retries |
 | **Best for** | Simple integrations, MVPs | Production, high-volume |
 
+### Option C: Agreement-First (No Immediate Payment)
+
+Use this when you want to **register a tenant relationship first** and send invoices later. No payment session is created upfront — the tenant gets an email alias where invoices can be forwarded.
+
+```
+1. BACKEND:  Create agreement via POST /agreements
+             → Returns: agreement_id, email_alias (e.g. john.doe+abc@casapay.me)
+2. OPERATOR: Forwards rent invoices to the email alias (or uses POST /agreements/{id}/invoice)
+3. CASAPAY:  Processes invoice PDF via AI, creates gateway checkout session
+4. TENANT:   Receives email with gateway checkout URL → pays via hosted checkout
+5. CASAPAY:  Sends webhook to your webhook_url (same as session-first flow)
+```
+
+**When to use agreement-first:**
+
+| | Session-First | Agreement-First |
+|---|---|---|
+| **Use case** | New tenant move-in with immediate payment | Register tenant, send invoices later |
+| **Payment timing** | Immediate (at checkout) | When operator sends invoice |
+| **Deposit/cover** | Set at session creation | Set at agreement creation |
+| **Email alias** | Generated after first payment | Generated immediately |
+| **Best for** | Onboarding + payment in one step | Ongoing rent collection via email |
+
 ---
 
 ## API Reference
@@ -344,6 +367,84 @@ Content-Type: application/json
 ```
 
 **After receiving this response, redirect the customer's browser to `gateway_url`.**
+
+---
+
+### 1b. Create Agreement (Agreement-First, No Immediate Payment)
+
+```
+POST /api/v1/gateway/agreements
+Authorization: Bearer sk_live_xxx
+Content-Type: application/json
+```
+
+Creates a PaymentAgreement with an email alias **without requiring a payment session**. The operator registers a tenant relationship upfront, then sends invoices later via the email alias or the invoice endpoint.
+
+#### Request Body
+
+```json
+{
+  "tenant": {
+    "email": "john@example.com",
+    "first_name": "John",
+    "last_name": "Doe",
+    "phone": "+3725551234",
+    "personal_code": "39001011234"
+  },
+  "agreement_type": "payment_link",
+  "cover_amount": 5000.00,
+  "currency": "EUR",
+  "description": "Apartment 5B, Tallinn"
+}
+```
+
+#### Field Reference
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tenant.email` | string | ✅ | Tenant email (find-or-create) |
+| `tenant.first_name` | string | ✅ | Tenant first name |
+| `tenant.last_name` | string | ✅ | Tenant last name |
+| `tenant.phone` | string | ❌ | Phone (E.164 format) |
+| `tenant.personal_code` | string | ❌ | Personal/ID code |
+| `agreement_type` | string | ✅ | `payment_link`, `ontime`, or `cover` |
+| `cover_amount` | number | ❌ | Guarantee/cover amount. Only for `ontime`/`cover`. Validated against entity `max_cover_amount`. |
+| `currency` | string | ❌ | `EUR` or `GBP` (default: entity currency) |
+| `description` | string | ❌ | Agreement title / description |
+
+#### Agreement Type Behavior
+
+| Type | Cover Amount | Email Alias Invoices | Payout |
+|------|-------------|---------------------|--------|
+| `payment_link` | ❌ Not allowed | Creates payment link | Immediate |
+| `ontime` | ✅ Optional | Creates gateway checkout session | Immediate (due date) |
+| `cover` | ✅ Optional | Creates gateway checkout session | Due date + 30 days |
+
+#### Response `201 Created`
+
+```json
+{
+  "id": 123,
+  "agreement_id": "PA-20260417-ABC123",
+  "agreement_type": "payment_link",
+  "status": "active",
+  "email_alias": "johndoe-abc123@casapay.me",
+  "currency": "EUR",
+  "cover_amount": null,
+  "description": "Apartment 5B, Tallinn",
+  "tenant": {
+    "id": 456,
+    "email": "john@example.com",
+    "first_name": "John",
+    "last_name": "Doe"
+  },
+  "created_at": "2026-04-17T00:00:00+00:00"
+}
+```
+
+**After creating the agreement, the operator can:**
+1. Forward invoice PDFs to the `email_alias` — CasaPay AI extracts the amount and sends the tenant a payment link (for `payment_link`) or gateway checkout URL (for `ontime`/`cover`)
+2. Use `POST /agreements/{id}/invoice` to create payment sessions programmatically
 
 ---
 
@@ -1550,11 +1651,17 @@ test "success_url_does_not_fulfill_order":
 │    Auth: Bearer sk_live_xxx                                   │
 │    Body: { cover_amount, first_payment_amount }               │
 │                                                               │
-│  CREATE SESSION:                                              │
+│  CREATE SESSION (session-first):                              │
 │    POST /api/v1/gateway/sessions                              │
 │    Auth: Bearer sk_live_xxx                                   │
 │    Body: { tenant, cover_amount, deposit_mode, ... }          │
 │    → Returns: session_id, gateway_url                         │
+│                                                               │
+│  CREATE AGREEMENT (agreement-first, no payment):              │
+│    POST /api/v1/gateway/agreements                            │
+│    Auth: Bearer sk_live_xxx                                   │
+│    Body: { tenant, agreement_type, cover_amount? }            │
+│    → Returns: agreement_id, email_alias                       │
 │                                                               │
 │  CREATE INVOICE (follow-up):                                  │
 │    POST /api/v1/gateway/agreements/{id}/invoice               │
