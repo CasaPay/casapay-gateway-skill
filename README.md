@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.7 | **Last Updated:** 2026-05-12
+> **Version:** 1.8 | **Last Updated:** 2026-05-12
 
 ---
 
@@ -747,11 +747,13 @@ Authorization: Bearer sk_live_xxx
 
 Returns a **temporary signed URL** for the invoice PDF so you can render/display it in your own UI without storing the file. The URL expires after the specified number of minutes.
 
+> ⚠️ **Call this on-demand, never cache or store the URL.** The returned link **expires** (default 24h, max 7 days). Best practice: call this endpoint **only when the user actually clicks "View invoice" / "Download PDF"** in your UI — then immediately redirect or embed the returned URL. Do NOT persist it in your database, include it in long-lived emails, or share it outside a short-lived context. If you need a persistent link for the tenant, keep the `invoice_id` instead and hit this endpoint fresh every time.
+
 #### Query Parameters
 
 | Param | Type | Description |
 |-------|------|-------------|
-| `expires_in_minutes` | int | Validity window (1–10080, default `1440` = 24 hours) |
+| `expires_in_minutes` | int | Validity window (1–10080, default `1440` = 24 hours). Use a short value (e.g. 10-60) if you're redirecting the browser immediately. |
 
 #### Response `200 OK`
 
@@ -772,7 +774,19 @@ Returns a **temporary signed URL** for the invoice PDF so you can render/display
 | `404 INVOICE_NOT_FOUND` | Invoice doesn't exist or doesn't belong to your entity |
 | `404 DOCUMENT_NOT_FOUND` | Invoice exists but has no PDF attached |
 
-> **Tip:** The signed URL is safe to send to the end tenant (it expires, and it doesn't reveal your API key). Do NOT cache it for longer than its lifetime.
+#### Recommended Usage Pattern
+
+```
+// ✅ DO: fetch the URL right before the user needs it
+function onUserClicksViewInvoice(invoiceId):
+    response = GET /api/v1/gateway/invoices/{invoiceId}/document?expires_in_minutes=15
+    redirect(response.document_url)
+
+// ❌ DON'T: store the URL in your DB and re-serve it later
+order.invoice_pdf_url = response.document_url  // will break after expires_at
+```
+
+> **Why?** The signed URL is safe to send to the end tenant (it doesn't reveal your API key), but it does expire. Calling the endpoint is cheap — do it every time.
 
 ---
 
@@ -1988,7 +2002,8 @@ test "success_url_does_not_fulfill_order":
 │    GET /api/v1/gateway/invoices/{id}/document                 │
 │    ?expires_in_minutes=60                                     │
 │    Auth: Bearer sk_live_xxx                                   │
-│    → Returns temporary signed URL                             │
+│    → Returns temporary signed URL — call on-demand,           │
+│      do NOT cache (the URL expires)                           │
 │                                                               │
 │  DEPOSIT MODES:                                               │
 │    deposit_upfront    → Tenant pays full deposit cash         │
@@ -2020,7 +2035,7 @@ test "success_url_does_not_fulfill_order":
 
 This skill file includes a version check mechanism. AI agents should periodically verify they have the latest version.
 
-**Current Version:** `1.7`
+**Current Version:** `1.8`
 **Version Check URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION`
 **Full Skill URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md`
 **Changelog:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/CHANGELOG.md`
@@ -2033,7 +2048,7 @@ When starting a new CasaPay Gateway integration task, or if more than 7 days hav
    ```
    curl -s https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION
    ```
-2. **Compare** the remote version with the version in this file header (`Version: 1.7`)
+2. **Compare** the remote version with the version in this file header (`Version: 1.8`)
 3. **If newer version exists**, download and replace this file:
    ```
    curl -s -o <path-to-this-file> https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md

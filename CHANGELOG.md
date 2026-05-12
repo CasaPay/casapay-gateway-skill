@@ -3,6 +3,26 @@
 All notable changes to the public skill + Postman collection are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.8] — 2026-05-12
+
+### Changed
+- Invoice Document URL endpoint section: added clear guidance that the signed
+  URL **expires** and should be **fetched on-demand** (when the user clicks
+  "View invoice") rather than cached or stored in your database. Includes a
+  do/don't usage-pattern example and a recommendation to use short expiry
+  windows (10–60 min) when redirecting the browser immediately.
+- Quick Reference Card note updated to flag the same expiry caveat.
+
+### Fixed (backend, not doc)
+- `createInvoiceSession()` now attaches a `Document` record to the created
+  Invoice when `document_url` is provided — previously only stored the PDF
+  in S3 without the DB link, causing `GET /invoices/{id}/document` to return
+  `DOCUMENT_NOT_FOUND` for any invoice created via `POST /agreements/{id}/invoice`.
+- `getInvoiceDocument()` fallback now generates a proper signed URL (via the
+  app-level `documents.view` route) for legacy invoices that pre-date the
+  Document record, instead of returning the raw public S3 URL (which failed
+  with AccessDenied when the bucket wasn't publicly readable).
+
 ## [1.7] — 2026-05-12
 
 ### Added
