@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.5 | **Last Updated:** 2026-07-17
+> **Version:** 1.6 | **Last Updated:** 2026-05-12
 
 ---
 
@@ -614,6 +614,168 @@ Response: `200 OK` with `{"session_id": "...", "status": "cancelled"}`
 
 ---
 
+### 5. List Session Logs (Debugging)
+
+```
+GET /api/v1/gateway/sessions/{session_id}/logs
+Authorization: Bearer sk_live_xxx
+```
+
+Returns the most recent request/webhook logs tied to a session so developers can see exactly which API calls hit CasaPay and which webhooks CasaPay sent back (including failures). Useful when debugging webhook delivery or validation issues.
+
+Both **inbound** (your API calls to CasaPay) and **outbound** (CasaPay → your webhook URL) records are returned.
+
+#### Query Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `direction` | string | `inbound` or `outbound` (omit for both) |
+| `success` | bool | Filter only successful (`true`) or failed (`false`) logs |
+| `per_page` | int | 1-200, default `25` |
+| `page` | int | Page number |
+
+#### Response `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "id": 987,
+      "direction": "outbound",
+      "method": "POST",
+      "path": "/webhook",
+      "target_url": "https://yourapp.com/webhooks/casapay",
+      "route_name": null,
+      "event_type": "gateway.session.completed",
+      "response_status": 200,
+      "success": true,
+      "error_code": null,
+      "summary": "Delivered (200)",
+      "duration_ms": 230,
+      "environment": "live",
+      "created_at": "2026-03-11T14:30:12+00:00"
+    },
+    {
+      "id": 986,
+      "direction": "inbound",
+      "method": "POST",
+      "path": "/api/v1/gateway/sessions",
+      "target_url": null,
+      "route_name": "gateway.sessions.create",
+      "event_type": null,
+      "response_status": 201,
+      "success": true,
+      "error_code": null,
+      "summary": "OK (201) · session gwy_abc123def456ghi789jkl012",
+      "duration_ms": 120,
+      "environment": "live",
+      "created_at": "2026-03-11T12:00:00+00:00"
+    }
+  ],
+  "meta": {
+    "current_page": 1,
+    "per_page": 25,
+    "total": 8,
+    "last_page": 1
+  },
+  "session_id": "gwy_abc123def456ghi789jkl012"
+}
+```
+
+> **Note:** This endpoint returns metadata only (method, path, status, timing). Full headers and bodies are not exposed via the API — contact CasaPay support if you need deeper inspection of a failing webhook.
+
+---
+
+### 6. List Agreement Invoices
+
+```
+GET /api/v1/gateway/agreements/{paymentAgreementId}/invoices
+Authorization: Bearer sk_live_xxx
+```
+
+Returns all invoices linked to a payment agreement with their payment status and payout (authorization hold) info. Useful for reconciliation and displaying payment history in your UI.
+
+#### Query Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `status` | string | Filter by invoice status: `paid`, `partial`, `unpaid`, `cancelled`, `rejected` |
+| `payout_status` | string | Filter by payout status: `created`, `pending`, `in_disbursement`, `settled`, `failed`, `cancelled` |
+| `per_page` | int | 1-200, default `50` |
+| `page` | int | Page number |
+
+#### Response `200 OK`
+
+```json
+{
+  "data": [
+    {
+      "id": 4501,
+      "invoice_no": "INV-2026-0004",
+      "reference_number": "2026040001",
+      "total_amount": 900.00,
+      "paid_amount": 900.00,
+      "status": "paid",
+      "due_date": "2026-04-01",
+      "paid_at": "2026-03-30T10:12:00+00:00",
+      "created_at": "2026-03-20T09:00:00+00:00",
+      "payout_status": "settled",
+      "payout_amount": 900.00,
+      "payout_target_date": "2026-04-01",
+      "payout_processed_at": "2026-04-01T08:00:00+00:00"
+    }
+  ],
+  "meta": {
+    "current_page": 1,
+    "per_page": 50,
+    "total": 4,
+    "last_page": 1
+  },
+  "payment_agreement_id": 123,
+  "agreement_id": "PA-20260311-ABC123"
+}
+```
+
+---
+
+### 7. Get Invoice Document URL
+
+```
+GET /api/v1/gateway/invoices/{invoiceId}/document?expires_in_minutes=60
+Authorization: Bearer sk_live_xxx
+```
+
+Returns a **temporary signed URL** for the invoice PDF so you can render/display it in your own UI without storing the file. The URL expires after the specified number of minutes.
+
+#### Query Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `expires_in_minutes` | int | Validity window (1–10080, default `1440` = 24 hours) |
+
+#### Response `200 OK`
+
+```json
+{
+  "invoice_id": 4501,
+  "document_url": "https://manage.casapay.com/documents/view?path=invoices/abc123.pdf&signature=...&expires=1710172800",
+  "file_name": "invoice-april-2026.pdf",
+  "mime_type": "application/pdf",
+  "expires_at": "2026-03-11T15:30:00+00:00"
+}
+```
+
+#### Error Responses
+
+| Code | Meaning |
+|------|---------|
+| `404 INVOICE_NOT_FOUND` | Invoice doesn't exist or doesn't belong to your entity |
+| `404 DOCUMENT_NOT_FOUND` | Invoice exists but has no PDF attached |
+
+> **Tip:** The signed URL is safe to send to the end tenant (it expires, and it doesn't reveal your API key). Do NOT cache it for longer than its lifetime.
+
+---
+
 ## Deposit Modes & Agreement Types
 
 ### Deposit Modes
@@ -628,12 +790,16 @@ The `deposit_mode` field controls how the security deposit is handled:
 
 ### How `choice` Mode Works
 
-When `deposit_mode` is `choice`, the checkout page shows two options:
+When `deposit_mode` is `choice`, the CasaPay hosted checkout page presents the customer with two options:
 
-- **Option A (Upfront):** Pay `cover_amount + first_payment_amount` = total
-- **Option B (Guaranteed):** Pay only `first_payment_amount` + monthly guarantee fee (~0.6%/month of cover)
+- **Option A (Pay deposit upfront):** Customer pays `cover_amount + first_payment_amount` in full — traditional deposit
+- **Option B (CasaPay Guarantee):** Customer pays only `first_payment_amount + monthly subscription fee` — CasaPay guarantees the deposit instead
 
-The customer's choice is recorded as `resolved_mode` in the session (`deposit_upfront` or `deposit_guaranteed`).
+The subscription fee is automatically calculated based on the entity's pricing configuration (typically ~2% annually of the cover amount, billed monthly).
+
+The customer's choice is recorded as `resolved_mode` on the session (`deposit_upfront` or `deposit_guaranteed`). Your webhook will include this in the `deposit.resolved_mode` field so you know which path the customer took.
+
+> **For your backend:** You don't need to handle the choice logic — CasaPay's hosted checkout handles it. You just send `deposit_mode: "choice"` when creating the session and check `deposit.resolved_mode` in the webhook to see what the customer chose.
 
 ### Use the Pricing Preview First
 
@@ -1680,6 +1846,22 @@ test "success_url_does_not_fulfill_order":
 │  CANCEL SESSION:                                              │
 │    POST /api/v1/gateway/sessions/{session_id}/cancel          │
 │    Auth: Bearer sk_live_xxx                                   │
+│                                                               │
+│  SESSION LOGS (DEBUG):                                        │
+│    GET /api/v1/gateway/sessions/{session_id}/logs             │
+│    ?direction=inbound|outbound&success=true|false             │
+│    Auth: Bearer sk_live_xxx                                   │
+│                                                               │
+│  LIST AGREEMENT INVOICES:                                     │
+│    GET /api/v1/gateway/agreements/{id}/invoices               │
+│    ?status=paid&payout_status=settled                         │
+│    Auth: Bearer sk_live_xxx                                   │
+│                                                               │
+│  INVOICE PDF URL:                                             │
+│    GET /api/v1/gateway/invoices/{id}/document                 │
+│    ?expires_in_minutes=60                                     │
+│    Auth: Bearer sk_live_xxx                                   │
+│    → Returns temporary signed URL                             │
 │                                                               │
 │  DEPOSIT MODES:                                               │
 │    deposit_upfront    → Tenant pays full deposit cash         │

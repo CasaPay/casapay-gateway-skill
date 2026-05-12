@@ -32,6 +32,10 @@
 			"value": ""
 		},
 		{
+			"key": "invoice_id",
+			"value": ""
+		},
+		{
 			"key": "gateway_url",
 			"value": ""
 		}
@@ -217,6 +221,47 @@
 						},
 						"description": "Cancel an active session before the tenant completes it."
 					}
+				},
+				{
+					"name": "2.4 List Session Logs (Debug)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var json = pm.response.json();",
+									"    pm.test('Returns logs payload', function() {",
+									"        pm.expect(json).to.have.property('data');",
+									"        pm.expect(json).to.have.property('meta');",
+									"        pm.expect(json.session_id).to.eql(pm.collectionVariables.get('session_id'));",
+									"    });",
+									"    ",
+									"    console.log('Total logs: ' + json.meta.total);",
+									"    (json.data || []).slice(0, 10).forEach(function(log) {",
+									"        console.log('[' + log.direction + '] ' + log.method + ' ' + (log.target_url || log.path) + ' → ' + log.response_status + ' (' + (log.duration_ms || '?') + 'ms)');",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/gateway/sessions/{{session_id}}/logs?per_page=25",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "sessions", "{{session_id}}", "logs"],
+							"query": [
+								{ "key": "per_page", "value": "25" },
+								{ "key": "direction", "value": "outbound", "disabled": true, "description": "inbound|outbound (omit for both)" },
+								{ "key": "success", "value": "false", "disabled": true, "description": "true/false to filter by outcome" },
+								{ "key": "page", "value": "1", "disabled": true }
+							]
+						},
+						"description": "Returns recent inbound (operator API calls) + outbound (webhook delivery) logs for this session. Useful for debugging webhook failures or verifying that CasaPay received your request.\n\n**Filters:**\n- `direction` — inbound / outbound\n- `success` — true / false\n- `per_page` — 1-200 (default 25)\n\nResponses include method, path, response_status, summary, duration, and timestamps. Raw bodies/headers are not exposed via the API."
+					}
 				}
 			]
 		},
@@ -382,6 +427,88 @@
 							"path": ["gateway", "sessions", "{{session_id}}"]
 						},
 						"description": "Check if the tenant has paid the invoice."
+					}
+				},
+				{
+					"name": "3.4 List Agreement Invoices",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var json = pm.response.json();",
+									"    pm.test('Returns invoices payload', function() {",
+									"        pm.expect(json).to.have.property('data');",
+									"        pm.expect(json).to.have.property('meta');",
+									"    });",
+									"",
+									"    if (json.data && json.data.length > 0) {",
+									"        pm.collectionVariables.set('invoice_id', json.data[0].id);",
+									"        console.log('First invoice ID stored: ' + json.data[0].id);",
+									"    }",
+									"",
+									"    console.log('Total invoices: ' + json.meta.total);",
+									"    (json.data || []).slice(0, 10).forEach(function(inv) {",
+									"        console.log('Invoice #' + inv.id + ' (' + inv.invoice_no + ') ' + inv.total_amount + ' ' + (inv.status || '') + ' · payout: ' + (inv.payout_status || 'none'));",
+									"    });",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/gateway/agreements/{{payment_agreement_id}}/invoices?per_page=50",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "agreements", "{{payment_agreement_id}}", "invoices"],
+							"query": [
+								{ "key": "per_page", "value": "50" },
+								{ "key": "status", "value": "paid", "disabled": true, "description": "paid | partial | unpaid | cancelled | rejected" },
+								{ "key": "payout_status", "value": "settled", "disabled": true, "description": "created | pending | in_disbursement | settled | failed | cancelled" },
+								{ "key": "page", "value": "1", "disabled": true }
+							]
+						},
+						"description": "Paginated list of invoices on a payment agreement along with their payout (authorization hold) status. Useful for reconciliation and showing payment history in your UI.\n\nEach row includes invoice totals, status, due/paid dates, and the linked authorization hold (payout_status, payout_amount, payout_target_date)."
+					}
+				},
+				{
+					"name": "3.5 Get Invoice Document URL (Temporary)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    var json = pm.response.json();",
+									"    pm.test('Returns signed URL', function() {",
+									"        pm.expect(json).to.have.property('document_url');",
+									"        pm.expect(json).to.have.property('expires_at');",
+									"    });",
+									"",
+									"    console.log('Invoice #' + json.invoice_id);",
+									"    console.log('File: ' + json.file_name + ' (' + json.mime_type + ')');",
+									"    console.log('Expires: ' + json.expires_at);",
+									"    console.log('URL: ' + json.document_url);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/gateway/invoices/{{invoice_id}}/document?expires_in_minutes=60",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "invoices", "{{invoice_id}}", "document"],
+							"query": [
+								{ "key": "expires_in_minutes", "value": "60", "description": "Validity window in minutes (1–10080, default 1440)" }
+							]
+						},
+						"description": "Returns a **temporary signed URL** for the invoice PDF. Useful when you want to display the original vendor invoice in your own UI without storing the file yourself.\n\nThe URL expires after `expires_in_minutes` (default 24 hours, max 7 days). Safe to pass to end tenants — it doesn't reveal your API key.\n\n**Errors:**\n- 404 INVOICE_NOT_FOUND — invoice missing / belongs to another entity\n- 404 DOCUMENT_NOT_FOUND — invoice has no PDF attached yet"
 					}
 				}
 			]
