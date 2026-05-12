@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.6 | **Last Updated:** 2026-05-12
+> **Version:** 1.7 | **Last Updated:** 2026-05-12
 
 ---
 
@@ -1145,6 +1145,133 @@ function create_session(session_data):
 - [ ] Alert on unmatched session IDs
 - [ ] Monitor for sessions that complete but webhook never arrives (use polling as fallback)
 
+> See the [Monitoring & Observability](#monitoring--observability) section below for concrete metrics, alert thresholds, and dashboard recommendations.
+
+---
+
+## Monitoring & Observability
+
+Integrating a payment gateway is a **critical path** — when it breaks, money stops moving. These are the metrics, alerts, and dashboards we strongly recommend building on top of the logs CasaPay already gives you (via `GET /sessions/{id}/logs` + your own webhook log).
+
+### What to Track
+
+#### 1. Session lifecycle metrics
+
+| Metric | What it tells you | How to measure |
+|--------|------------------|----------------|
+| `sessions.created.count` | Onboarding / checkout volume | Count of successful `POST /sessions` + `POST /agreements/{id}/invoice` |
+| `sessions.completed.count` | Successful conversions | Count of `gateway.session.completed` webhooks |
+| `sessions.expired.count` | Tenants abandoning checkout | Count of `gateway.session.expired` webhooks |
+| `sessions.failed.count` | Payment / verification failures | Count of `gateway.payment.failed` + `gateway.verification.failed` |
+| **Conversion rate** | % of created sessions that complete | `completed / created` per entity/day |
+| **Time-to-complete** | UX health | `completed_at - created_at` distribution |
+
+#### 2. Webhook reliability metrics
+
+| Metric | Why it matters | Threshold |
+|--------|----------------|-----------|
+| `webhook.received.count` | Inbound traffic baseline | — |
+| `webhook.signature_invalid.count` | **Security signal** | > 0 = investigate |
+| `webhook.timestamp_rejected.count` | Clock skew / replay | > 1% = investigate |
+| `webhook.processing.p95_ms` | Handler latency | < 1000 ms |
+| `webhook.processing.errors.count` | Your handler crashed | > 0 = page on-call |
+| `webhook.retry.count` | How often CasaPay had to retry | Persistent non-zero = your endpoint is flaky |
+
+#### 3. API call metrics (from CasaPay's side, via `/logs`)
+
+| Metric | What to watch for |
+|--------|-------------------|
+| `casapay.api.4xx.rate` | 4xx responses indicate bad requests from your side (validation, auth) |
+| `casapay.api.5xx.rate` | 5xx responses from CasaPay — page CasaPay support if sustained |
+| `casapay.api.latency.p95_ms` | Degraded performance on CasaPay side |
+| `casapay.outbound_webhook.failed.rate` | CasaPay tried to call your webhook and failed — cross-check against your firewall/WAF |
+
+### Alert Thresholds (Suggested Starting Point)
+
+Tune these to your traffic volume. The point is to alert on **deviations from your normal**, not on absolute numbers.
+
+| Alert | Condition | Severity |
+|-------|-----------|----------|
+| **Webhook endpoint down** | 3+ consecutive outbound webhook failures for same session | P1 — page on-call |
+| **Signature verification failure** | Any `webhook.signature_invalid.count > 0` in 5 min | P2 — investigate (possible attack) |
+| **Conversion rate drop** | Completed/created < 70% of 7-day baseline for > 30 min | P2 |
+| **API 5xx burst** | > 5 × 5xx responses from CasaPay in 1 min | P2 — contact CasaPay |
+| **Session-created → completed gap** | Session `pending` > 24h but your DB shows customer clicked | P3 — investigate checkout UX |
+| **API key nearing revocation** | `401 INVALID_API_KEY` seen in production | P1 — check key rotation |
+| **Rate limiting** | `429` responses > 0 | P3 — add backoff / request quota increase |
+
+### Dashboards to Build
+
+#### A. "Is CasaPay healthy right now?" (ops dashboard)
+
+- Current 5-min rolling: sessions created, sessions completed, conversion %
+- Webhook delivery success rate (last 1h) as a line chart
+- Live table of the 20 most recent failed webhooks (direction, status, error_code, summary) — pull from `GET /sessions/{id}/logs?success=false`
+- API p95 latency sparkline (from your outbound HTTP client)
+
+#### B. "How are my integrations performing?" (per-entity)
+
+- Per-entity conversion funnel: created → verified → paid → guarantee_active
+- Top 10 failure reasons (group by `error_code`)
+- Average time-to-complete by `agreement_type` (ontime vs cover vs payment_link)
+
+#### C. "Financial reconciliation" (finance)
+
+- Daily `sessions.completed.sum(amount)` vs your own order totals — should match
+- `guarantee.activated` count vs. cover amount sum — deposit exposure
+- Aging: `unpaid` invoices per agreement (via `GET /agreements/{id}/invoices?status=unpaid`)
+
+### Log Retention
+
+| Log type | Recommended retention |
+|----------|----------------------|
+| Outbound webhook attempts (to CasaPay → from you) | 90 days |
+| Inbound webhook receipts (from CasaPay → to you) | 180 days (regulatory/audit) |
+| Processed webhook idempotency table | 30 days (long enough for CasaPay's retry window) |
+| Failed signature verifications | **Forever** (security audit trail) |
+| API request/response bodies | 30 days (storage cost vs. debugging value) |
+
+### Structured Logging Checklist
+
+Every webhook & API interaction should log these fields as structured JSON (makes dashboards trivial):
+
+```json
+{
+  "event": "casapay.webhook.received",
+  "session_id": "gwy_abc123",
+  "event_type": "gateway.session.completed",
+  "signature_valid": true,
+  "timestamp_skew_seconds": 3,
+  "processing_ms": 142,
+  "outcome": "fulfilled",
+  "order_id": "ORD-12345",
+  "tenant_email": "john@example.com"
+}
+```
+
+**Do NOT log:**
+- Raw `Authorization` header value
+- Full card numbers / CVV (CasaPay never sends these)
+- Webhook secret
+
+### Correlation IDs
+
+When you call CasaPay, generate a request ID on your side and log it. Then when you call `GET /sessions/{id}/logs` to debug, you can cross-reference the exact row CasaPay logged — matched by `session_id` and timestamp. This cuts debugging time from hours to minutes.
+
+### Health Check Pattern
+
+Run a synthetic transaction every 5-15 minutes against **sandbox**:
+
+```
+1. Create session with simulator payment method
+2. Auto-complete via the test simulator endpoint
+3. Expect webhook within 30s
+4. Verify signature passed
+5. Alert if any step fails
+```
+
+This detects breakage before real customers hit it.
+
 ---
 
 ## Code Examples (Multi-Language)
@@ -1893,9 +2020,10 @@ test "success_url_does_not_fulfill_order":
 
 This skill file includes a version check mechanism. AI agents should periodically verify they have the latest version.
 
-**Current Version:** `1.6`
+**Current Version:** `1.7`
 **Version Check URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION`
 **Full Skill URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md`
+**Changelog:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/CHANGELOG.md`
 
 ### For AI Agents: Self-Update Instructions
 
@@ -1905,7 +2033,7 @@ When starting a new CasaPay Gateway integration task, or if more than 7 days hav
    ```
    curl -s https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION
    ```
-2. **Compare** the remote version with the version in this file header (`Version: 1.6`)
+2. **Compare** the remote version with the version in this file header (`Version: 1.7`)
 3. **If newer version exists**, download and replace this file:
    ```
    curl -s -o <path-to-this-file> https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
