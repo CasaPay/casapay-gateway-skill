@@ -2125,7 +2125,7 @@ When starting a new CasaPay Gateway integration task, or if more than 7 days hav
    ```
    curl -s https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION
    ```
-2. **Compare** the remote version with the version in this file header (`Version: 1.9`)
+2. **Compare** the remote version with the version in this file header (`Version: 1.10`)
 3. **If newer version exists**, download and replace this file:
    ```
    curl -s -o <path-to-this-file> https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
