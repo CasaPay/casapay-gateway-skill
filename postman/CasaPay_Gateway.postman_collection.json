@@ -352,14 +352,14 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"amount\": 850.00,\n    \"description\": \"March 2026 rent\",\n    \"document_url\": \"https://example.com/invoices/march-2026.pdf\",\n    \"success_url\": \"https://example.com/success\",\n    \"cancel_url\": \"https://example.com/cancel\"\n}"
+							"raw": "{\n    \"amount\": 850.00,\n    \"description\": \"March 2026 rent\",\n    \"document_url\": \"https://example.com/invoices/march-2026.pdf\",\n    \"due_date\": \"2026-03-01\",\n    \"success_url\": \"https://example.com/success\",\n    \"cancel_url\": \"https://example.com/cancel\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}/gateway/agreements/{{payment_agreement_id}}/invoice",
 							"host": ["{{base_url}}"],
 							"path": ["gateway", "agreements", "{{payment_agreement_id}}", "invoice"]
 						},
-						"description": "Create a rent invoice on the existing agreement.\n\n**Required:** `amount`, `success_url`, `cancel_url`\n**Optional:** `description`, `document_url`, `metadata`\n\n`document_url` — the API fetches and stores the PDF when the request is made. If the URL is unreachable, the request fails with 422.\n\nThe tenant clicks the gateway URL → sees amount + optional PDF → pays → done."
+						"description": "Create a rent invoice on the existing agreement.\n\n**Required:** `amount`, `success_url`, `cancel_url`\n**Optional:** `description`, `document_url`, `due_date`, `metadata`\n\n`due_date` — ISO 8601 date (`YYYY-MM-DD`), must be today or in the future. Determines when the invoice is considered overdue and when CasaPay pays out the operator (`ontime` = on due date, `cover` = due date + 30 days grace). Defaults to today if omitted.\n\n`document_url` — the API fetches and stores the PDF when the request is made. If the URL is unreachable, the request fails with 422.\n\nThe tenant clicks the gateway URL → sees amount + optional PDF → pays → done."
 					}
 				},
 				{

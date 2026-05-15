@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.8 | **Last Updated:** 2026-05-12
+> **Version:** 1.10 | **Last Updated:** 2026-05-15
 
 ---
 
@@ -465,11 +465,23 @@ Creates a payment-only session on an existing active PaymentAgreement. No tenant
   "amount": 900.00,
   "description": "Monthly rent - May 2026",
   "document_url": "https://example.com/invoice-may.pdf",
+  "due_date": "2026-05-01",
   "success_url": "https://yourapp.com/payment/success",
   "cancel_url": "https://yourapp.com/payment/cancel",
   "metadata": { "invoice_number": "INV-2026-05" }
 }
 ```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `amount` | number | ✅ | Invoice amount (min 0.01, max 999,999.99) |
+| `success_url` | string | ✅ | Redirect URL after successful payment |
+| `cancel_url` | string | ✅ | Redirect URL if the tenant cancels |
+| `description` | string | ❌ | Shown to the tenant on checkout (e.g. `"Monthly rent - May 2026"`) |
+| `document_url` | string | ❌ | URL to the invoice PDF. CasaPay fetches & stores it on request (fails with 422 if unreachable) |
+| `due_date` | string | ❌ | ISO 8601 date (`YYYY-MM-DD`), must be today or in the future. Drives when CasaPay pays out the operator: `ontime` agreements pay on `due_date`, `cover` agreements pay on `due_date + 30` days grace. **If omitted, defaults to today** (meaning payout is triggered immediately for `ontime` / after 30 days for `cover`). Pass this whenever you know the tenant's actual rent due date so the payout cadence matches your billing cycle. |
+| `metadata` | object | ❌ | Arbitrary key-value pairs returned in webhooks (max 20 keys, values ≤ 500 chars) |
+
 
 #### Response `201 Created`
 
@@ -843,8 +855,70 @@ Behind the scenes, CasaPay creates different agreement types:
 | `gateway.session.expired` | Session timed out |
 | `gateway.session.cancelled` | Session cancelled |
 | `gateway.verification.failed` | KYC verification failed |
-| `gateway.payment.failed` | Payment attempt failed |
+| `gateway.payment.failed` | **Soft** payment error — session stays usable, tenant can retry on the same gateway URL. See [Soft Payment Errors](#soft-payment-errors). |
 | `gateway.guarantee.activated` | CasaPay Guarantee activated for deposit |
+
+#### Soft Payment Errors
+
+`gateway.payment.failed` is a **soft** error — it does not terminate the session.
+The tenant can retry on the same gateway URL (e.g. by trying a different bank or
+card), and the session stays in `pending` status with `current_step = payment`.
+
+Use it to:
+- surface "Payment didn't go through, please try again" UI in your operator
+  console for the affected tenant,
+- send a follow-up reminder if the tenant abandons the retry,
+- branch your collection workflow (e.g. trigger a different reminder cadence
+  when `failure.reason = insufficient_funds`).
+
+The webhook payload extends the standard envelope with a `failure` block:
+
+```json
+{
+  "event": "gateway.payment.failed",
+  "session_id": "gwy_abc123def456ghi789jkl012",
+  "timestamp": "2026-03-11T14:30:00+00:00",
+  "tenant": { "...": "..." },
+  "failure": {
+    "reason": "bank_declined",
+    "code": "PAYMENT_BANK_DECLINED",
+    "message": "EveryPay returned payment_state=voided",
+    "retry_count": 2,
+    "can_retry": true,
+    "payment_method": "everypay_bank",
+    "provider": "everypay",
+    "provider_state": "voided"
+  }
+}
+```
+
+`failure.reason` is a stable, machine-readable enum:
+
+| Reason | When it fires (production) | Simulator scenario |
+|--------|----------------------------|--------------------|
+| `payment_failed` | EveryPay `payment_state=failed` | `payment_failed` |
+| `payment_timeout` | No PSP response in window | `payment_timeout` |
+| `bank_declined` | EveryPay `payment_state=voided` (issuer / ASPSP refused) | `payment_bank_declined` |
+| `insufficient_funds` | (currently simulator-only) | `payment_insufficient_funds` |
+| `customer_cancelled` | EveryPay `payment_state=abandoned` (tenant clicked back at the bank) | `payment_customer_cancelled` |
+| `3ds_failed` | (currently simulator-only) | `payment_3ds_failed` |
+
+**Replicating in test mode:** any of the simulator scenarios above can be
+triggered against a `sk_test_…` session via:
+
+```bash
+curl -X POST https://api-test.casapay.com/api/v1/gateway/public/sessions/{session_id}/simulator \
+  -H "Content-Type: application/json" \
+  -d '{"scenario": "payment_bank_declined"}'
+```
+
+The simulator dispatches the same `gateway.payment.failed` webhook your
+production handler will receive, so you can test the full operator-side flow
+end-to-end without touching a real PSP.
+
+The webhook is also recorded in `gateway_request_logs` (alongside inbound
+operator API traffic), so you can inspect every soft failure for a session via
+`GET /api/v1/gateway/sessions/{session_id}/logs?direction=outbound&event_type=gateway.payment.failed`.
 
 ### Webhook Payload Example (`gateway.session.completed`)
 
@@ -1973,7 +2047,10 @@ test "success_url_does_not_fulfill_order":
 │  CREATE INVOICE (follow-up):                                  │
 │    POST /api/v1/gateway/agreements/{id}/invoice               │
 │    Auth: Bearer sk_live_xxx                                   │
-│    Body: { amount, success_url, cancel_url }                  │
+│    Body: { amount, success_url, cancel_url,                   │
+│            due_date?, description?, document_url?, metadata?} │
+│    due_date → ISO YYYY-MM-DD, drives payout timing            │
+│                (ontime = due date, cover = +30d grace)        │
 │                                                               │
 │  GET AGREEMENT:                                               │
 │    GET /api/v1/gateway/agreements/{id}                        │
@@ -2035,7 +2112,7 @@ test "success_url_does_not_fulfill_order":
 
 This skill file includes a version check mechanism. AI agents should periodically verify they have the latest version.
 
-**Current Version:** `1.8`
+**Current Version:** `1.10`
 **Version Check URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION`
 **Full Skill URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md`
 **Changelog:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/CHANGELOG.md`
@@ -2048,12 +2125,14 @@ When starting a new CasaPay Gateway integration task, or if more than 7 days hav
    ```
    curl -s https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION
    ```
-2. **Compare** the remote version with the version in this file header (`Version: 1.8`)
+2. **Compare** the remote version with the version in this file header (`Version: 1.9`)
 3. **If newer version exists**, download and replace this file:
    ```
    curl -s -o <path-to-this-file> https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
    ```
 4. **Notify the developer** that the skill was updated
+
+> The version-check string in step 2 is `Version: 1.10` (matches the file header).
 
 ### For CI/CD: Automated Update Script
 
