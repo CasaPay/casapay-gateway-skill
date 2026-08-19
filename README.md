@@ -2,7 +2,9 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.10 | **Last Updated:** 2026-05-15
+> **Version:** 1.11 | **Last Updated:** 2026-08-19
+>
+> **Full documentation:** https://github.com/CasaPay/cp-api-docs — hosted API reference and flow guides.
 
 ---
 
@@ -620,9 +622,40 @@ Authorization: Bearer sk_live_xxx
 ```
 POST /api/v1/gateway/sessions/{session_id}/cancel
 Authorization: Bearer sk_live_xxx
+Content-Type: application/json
+
+{
+  "reason": "operator_cancelled",
+  "note": "Tenant asked to re-issue the link"
+}
 ```
 
 Response: `200 OK` with `{"session_id": "...", "status": "cancelled"}`
+
+#### Body (optional)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reason` | enum | `customer_cancelled` or `operator_cancelled`. Defaults to `operator_cancelled` on this endpoint, `customer_cancelled` on the public checkout endpoint. |
+| `note` | string | Free-text detail stored on the session and echoed on the webhook. Max 500 chars. |
+
+The reason is persisted on the session and included as a `cancellation` block on
+the `gateway.session.cancelled` webhook, so you can tell an abandoned checkout
+apart from an operator revoking the link or a system-driven cleanup.
+
+#### Cancellation is only possible before money moves
+
+| Situation | Result |
+|-----------|--------|
+| Session `pending` / `processing`, unpaid | ✅ Cancelled |
+| Session already `completed`/`expired`/`cancelled`/`failed` | ❌ `400 CANCEL_FAILED` |
+| Session payment already completed | ❌ `400 CANCEL_FAILED` |
+
+⚠️ **Cancelling a session does NOT cancel the invoice.** An invoice can have
+several sessions, so cancelling one checkout attempt leaves the invoice payable
+and lets you issue a fresh link. Cancelling the **invoice** is a separate
+operation, and is refused once the tenant has paid (even partially) or the
+operator payout has left `pending`.
 
 ---
 
@@ -857,6 +890,36 @@ Behind the scenes, CasaPay creates different agreement types:
 | `gateway.verification.failed` | KYC verification failed |
 | `gateway.payment.failed` | **Soft** payment error — session stays usable, tenant can retry on the same gateway URL. See [Soft Payment Errors](#soft-payment-errors). |
 | `gateway.guarantee.activated` | CasaPay Guarantee activated for deposit |
+
+#### Cancellation Reasons
+
+`gateway.session.cancelled` carries a `cancellation` block:
+
+```json
+{
+  "event": "gateway.session.cancelled",
+  "session_id": "gwy_...",
+  "cancellation": {
+    "reason": "invoice_paid_externally",
+    "code": "CANCEL_INVOICE_PAID_EXTERNALLY",
+    "source": "system",
+    "note": null,
+    "cancelled_at": "2026-03-01T10:02:00+00:00"
+  }
+}
+```
+
+| Reason | Source | Meaning |
+|--------|--------|---------|
+| `customer_cancelled` | `tenant` | Tenant abandoned checkout |
+| `operator_cancelled` | `operator` | You cancelled via API or dashboard |
+| `invoice_paid_externally` | `system` | Invoice settled another way; session closed to prevent a double payment |
+| `invoice_cancelled` | `system` | Underlying invoice cancelled or rejected |
+| `invoice_not_payable` | `system` | Invoice no longer payable at completion time |
+| `payment_agreement_mismatch` | `system` | Safety guard: session and invoice disagreed on the agreement |
+
+Treat this enum as open-ended — new system reasons can be added without a
+breaking change.
 
 #### Soft Payment Errors
 
@@ -2112,10 +2175,11 @@ test "success_url_does_not_fulfill_order":
 
 This skill file includes a version check mechanism. AI agents should periodically verify they have the latest version.
 
-**Current Version:** `1.10`
+**Current Version:** `1.11`
 **Version Check URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION`
 **Full Skill URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md`
 **Changelog:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/CHANGELOG.md`
+**Hosted Docs:** `https://github.com/CasaPay/cp-api-docs`
 
 ### For AI Agents: Self-Update Instructions
 

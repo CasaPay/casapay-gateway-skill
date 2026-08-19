@@ -3,6 +3,30 @@
 All notable changes to the public skill + Postman collection are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.11] — 2026-08-19
+
+### Added
+- **Cancellation reasons.** `POST /sessions/{id}/cancel` now accepts an optional
+  `reason` (`customer_cancelled` | `operator_cancelled`) and free-text `note`
+  (max 500). The reason, a derived `code`, the `source` (tenant / operator /
+  system) and `cancelled_at` are persisted on the session.
+  - `gateway.session.cancelled` now carries a `cancellation` block so integrators
+    can distinguish an abandoned checkout from an operator revoking the link or a
+    system-driven cleanup.
+  - System reasons documented: `invoice_paid_externally`, `invoice_cancelled`,
+    `invoice_not_payable`, `payment_agreement_mismatch`. Treat the enum as
+    open-ended.
+- **Hosted documentation.** Full API reference and flow guides now published from
+  https://github.com/CasaPay/cp-api-docs. The skill remains the compact,
+  agent-oriented summary; the docs site carries the long-form guides.
+
+### Changed
+- Cancel Session section documents the **money-has-moved** rule explicitly: a
+  session whose payment has completed can no longer be cancelled (`400
+  CANCEL_FAILED`), and cancelling a session never cancels the underlying invoice.
+- Clarified that invoice cancellation is refused once the tenant has paid (even
+  partially) or the operator payout has left `pending`.
+
 ## [1.10] — 2026-05-15
 
 ### Added
