@@ -3,6 +3,21 @@
 All notable changes to the public skill + Postman collection are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.12] — 2026-10-12
+
+### Added
+- **`invoice_no` on `POST /sessions`** (optional). Your own invoice number:
+  max 50 chars; letters, numbers, spaces and `/ - _ .`; anything else → `422`.
+  It becomes the invoice number of the invoice booked when the tenant pays.
+  Without it the invoice keeps a generated `GWY-XXXXXXXX`.
+- `reference_number` row added to the session field table. The field was
+  already accepted but was missing from the skill.
+
+### Changed
+- `metadata` row now says it is stored as-is and never mapped onto the
+  invoice. Use `invoice_no` / `reference_number` for invoice fields.
+- Auto-update version bumped to `1.12`.
+
 ## [1.11] — 2026-10-12
 
 ### Added

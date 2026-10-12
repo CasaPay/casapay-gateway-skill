@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.11 | **Last Updated:** 2026-10-12
+> **Version:** 1.12 | **Last Updated:** 2026-10-12
 
 ---
 
@@ -342,11 +342,13 @@ Content-Type: application/json
 | `currency` | string | ❌ | `EUR` or `GBP` (default: `EUR`) |
 | `description` | string | ❌ | Description shown on checkout page |
 | `document_url` | string | ❌ | URL to a document (contract, etc.) |
+| `invoice_no` | string | ❌ | Your own invoice number (max 50 chars; letters, numbers, spaces and `/ - _ .`). Becomes the invoice number of the invoice booked when the tenant pays. Omit it to get a generated `GWY-XXXXXXXX`. |
+| `reference_number` | string | ❌ | Payment reference (max 35 chars). Copied to the invoice and into the payout description on your bank statement. |
 | `verification_required` | bool/null | ❌ | `true`=force, `false`=skip, `null`=entity default |
 | `allowed_payment_methods` | array | ❌ | `["card", "bank_transfer", "open_banking"]` |
 | `success_url` | string | ✅ | Redirect URL after success. `{session_id}` placeholder supported |
 | `cancel_url` | string | ✅ | Redirect URL if customer cancels |
-| `metadata` | object | ❌ | Arbitrary key-value pairs (returned in webhooks, max 20 keys) |
+| `metadata` | object | ❌ | Arbitrary key-value pairs (returned in webhooks, max 20 keys). Stored as-is and never mapped onto the invoice — use `invoice_no` / `reference_number` for those. |
 
 *At least one of `cover_amount`, `first_payment_amount`, or `amount` is required.
 
@@ -2163,7 +2165,7 @@ test "success_url_does_not_fulfill_order":
 
 This skill file includes a version check mechanism. AI agents should periodically verify they have the latest version.
 
-**Current Version:** `1.11`
+**Current Version:** `1.12`
 **Version Check URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION`
 **Full Skill URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md`
 **Changelog:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/CHANGELOG.md`
@@ -2176,14 +2178,14 @@ When starting a new CasaPay Gateway integration task, or if more than 7 days hav
    ```
    curl -s https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION
    ```
-2. **Compare** the remote version with the version in this file header (`Version: 1.11`)
+2. **Compare** the remote version with the version in this file header (`Version: 1.12`)
 3. **If newer version exists**, download and replace this file:
    ```
    curl -s -o <path-to-this-file> https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
    ```
 4. **Notify the developer** that the skill was updated
 
-> The version-check string in step 2 is `Version: 1.11` (matches the file header).
+> The version-check string in step 2 is `Version: 1.12` (matches the file header).
 
 ### For CI/CD: Automated Update Script
 
