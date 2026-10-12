@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.10 | **Last Updated:** 2026-05-15
+> **Version:** 1.11 | **Last Updated:** 2026-10-12
 
 ---
 
@@ -620,9 +620,57 @@ Authorization: Bearer sk_live_xxx
 ```
 POST /api/v1/gateway/sessions/{session_id}/cancel
 Authorization: Bearer sk_live_xxx
+Content-Type: application/json
 ```
 
-Response: `200 OK` with `{"session_id": "...", "status": "cancelled"}`
+#### Request Body (all optional)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `reason` | string | Why the session is cancelled: `operator_cancelled` (default) or `customer_cancelled`. Any other value → `422`. |
+| `note` | string | Free-text detail (max 500 chars), stored with the cancellation and on the cancelled invoice. |
+| `cascade` | boolean | Default `true`. Also cancel the linked invoice, its collection and the pending operator payout. Pass `false` to cancel only the session. |
+
+```json
+{
+  "reason": "operator_cancelled",
+  "note": "Tenant moved to a different unit"
+}
+```
+
+#### Response (`200 OK`)
+
+```json
+{
+  "session_id": "gwy_abc123def456ghi789jkl012",
+  "status": "cancelled",
+  "cancellation_reason": "operator_cancelled",
+  "invoice_cancelled": true
+}
+```
+
+`invoice_cancelled` is `null` when the session has no linked invoice.
+
+#### Cancellation Rules
+
+A session can be cancelled **only while no money has moved**:
+
+| Situation | Result |
+|-----------|--------|
+| Session is `pending` / `processing` and the tenant has not paid | ✅ Session cancelled. With `cascade`, the linked invoice, its collection and the pending payout (authorization hold) are cancelled too. |
+| Tenant payment completed on this session (even if the webhook is still in flight) | ❌ `400 CANCEL_FAILED`: *"Session payment has already completed and cannot be cancelled."* |
+| Session already terminal (`completed`, `expired`, `cancelled`, `failed`) | ❌ `400 CANCEL_FAILED`: *"Session is already in a terminal state."* |
+| Linked invoice already (partly) paid another way, or the operator payout has left `pending` | ⚠️ Session is cancelled, but the invoice, collection and payout are **left untouched**. The response has `invoice_cancelled: false`. |
+
+Error response shape:
+
+```json
+{ "error": "Session payment has already completed and cannot be cancelled.", "code": "CANCEL_FAILED" }
+```
+
+A successful cancel sends the `gateway.session.cancelled` webhook.
+
+> **Always check `invoice_cancelled`.** If it is `false`, money has already moved for that invoice. Handle it as a refund or credit, not as a cancelled request.
 
 ---
 
@@ -854,6 +902,8 @@ Behind the scenes, CasaPay creates different agreement types:
 | `gateway.session.completed` | All steps done (paid + optionally guaranteed) |
 | `gateway.session.expired` | Session timed out |
 | `gateway.session.cancelled` | Session cancelled |
+| `gateway.verification.pending` | KYC submitted, awaiting manual review — not stalled |
+| `gateway.verification.approved` | KYC approved; session moves to payment (tenant also emailed) |
 | `gateway.verification.failed` | KYC verification failed |
 | `gateway.payment.failed` | **Soft** payment error — session stays usable, tenant can retry on the same gateway URL. See [Soft Payment Errors](#soft-payment-errors). |
 | `gateway.guarantee.activated` | CasaPay Guarantee activated for deposit |
@@ -1132,6 +1182,7 @@ API keys and webhook secrets are:
 | `403` | `GATEWAY_NOT_ENABLED` | Gateway not enabled for this entity | Contact CasaPay |
 | `404` | `SESSION_NOT_FOUND` | Session ID doesn't exist | Verify session_id |
 | `400` | `SESSION_NOT_ACTIVE` | Session in terminal state | Create new session |
+| `400` | `CANCEL_FAILED` | Cancel refused: session already terminal, or the tenant's payment completed | Do not retry; see [Cancellation Rules](#cancellation-rules) |
 | `400` | `GUARANTEE_LIMIT_EXCEEDED` | Deposit > €15,000 | Reduce deposit amount |
 | `422` | `VALIDATION_ERROR` | Request body validation failed | Check error details |
 | `429` | (Rate limited) | Too many requests | Implement backoff |
@@ -2112,7 +2163,7 @@ test "success_url_does_not_fulfill_order":
 
 This skill file includes a version check mechanism. AI agents should periodically verify they have the latest version.
 
-**Current Version:** `1.10`
+**Current Version:** `1.11`
 **Version Check URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION`
 **Full Skill URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md`
 **Changelog:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/CHANGELOG.md`
@@ -2125,14 +2176,14 @@ When starting a new CasaPay Gateway integration task, or if more than 7 days hav
    ```
    curl -s https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION
    ```
-2. **Compare** the remote version with the version in this file header (`Version: 1.10`)
+2. **Compare** the remote version with the version in this file header (`Version: 1.11`)
 3. **If newer version exists**, download and replace this file:
    ```
    curl -s -o <path-to-this-file> https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
    ```
 4. **Notify the developer** that the skill was updated
 
-> The version-check string in step 2 is `Version: 1.10` (matches the file header).
+> The version-check string in step 2 is `Version: 1.11` (matches the file header).
 
 ### For CI/CD: Automated Update Script
 

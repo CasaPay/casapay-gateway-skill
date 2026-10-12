@@ -214,12 +214,19 @@
 					"name": "2.3 Cancel Session",
 					"request": {
 						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"reason\": \"operator_cancelled\",\n    \"note\": \"Tenant moved to a different unit\"\n}"
+						},
 						"url": {
 							"raw": "{{base_url}}/gateway/sessions/{{session_id}}/cancel",
 							"host": ["{{base_url}}"],
 							"path": ["gateway", "sessions", "{{session_id}}", "cancel"]
 						},
-						"description": "Cancel an active session before the tenant completes it."
+						"description": "Cancel an active session before the tenant pays.\n\n**Optional body:** `reason` (`operator_cancelled` default | `customer_cancelled`), `note` (max 500 chars), `cascade` (default `true`).\n\n**Rules:**\n- Refused with `400 CANCEL_FAILED` once the tenant's payment on this session has completed, or if the session is already terminal.\n- With `cascade`, the linked invoice, its collection and the pending payout (authorization hold) are cancelled too.\n- If the invoice was already (partly) paid or the payout has left `pending`, only the session is cancelled. The response has `invoice_cancelled: false`.\n\n**Response:** `session_id`, `status`, `cancellation_reason`, `invoice_cancelled`."
 					}
 				},
 				{

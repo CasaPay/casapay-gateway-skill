@@ -3,6 +3,35 @@
 All notable changes to the public skill + Postman collection are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.11] — 2026-10-12
+
+### Added
+- **Cancel session request body.** `POST /sessions/{id}/cancel` now documents
+  its optional fields:
+  - `reason`: `operator_cancelled` (default) or `customer_cancelled`;
+  - `note`: free text, max 500 chars;
+  - `cascade`: default `true`.
+- **Cancel response fields.** `cancellation_reason` and `invoice_cancelled`
+  are now documented.
+- **Cancellation rules.** A session can only be cancelled while no money has
+  moved:
+  - refused with `400 CANCEL_FAILED` once the tenant's payment on the session
+    has completed (even while the webhook is in flight), or when the session is
+    already terminal;
+  - with `cascade`, the linked invoice, its collection and the pending
+    operator payout (authorization hold) are cancelled too;
+  - if the invoice was already (partly) paid or the payout has left `pending`,
+    the session is cancelled but those records are left untouched
+    (`invoice_cancelled: false`).
+- `CANCEL_FAILED` added to the HTTP error code table.
+- `gateway.verification.pending` / `gateway.verification.approved` rows in the
+  Event Types table. They were already in the doc but had not been published.
+
+### Changed
+- Postman: "2.3 Cancel Session" now has an example body and a description of
+  the cancellation rules.
+- Auto-update version bumped to `1.11`.
+
 ## [1.10] — 2026-05-15
 
 ### Added
