@@ -1,7 +1,7 @@
 {
 	"info": {
 		"name": "CasaPay Gateway API",
-		"description": "CasaPay Gateway operator API — **Guarantee flow** (no tenant choice, deposit always covered by CasaPay Guarantee).\n\n## Setup\n1. Set `base_url` to your API URL (e.g. `https://api.casapay.com/api/v1`)\n2. Set `api_secret` to your test key (`sk_test_...`)\n3. Run requests in order — variables auto-populate between requests\n\n## Flow\n1. **Pricing Preview** — See guarantee subscription costs + rent fees\n2. **Create Session** — Onboard tenant: guarantee deposit + first rent\n3. **Get Session** — Poll until completed, grab `payment_agreement_id`\n4. **Follow-up Invoices** — Monthly rent invoices on the existing agreement",
+		"description": "CasaPay Gateway operator API — **Guarantee flow** (no tenant choice, deposit always covered by CasaPay Guarantee).\n\n## Setup\n1. Set `base_url` to your API URL (sandbox `https://manage.test.casapay.com/api/v1`, live `https://manage.casapay.com/api/v1`)\n2. Set `api_secret` to your test key (`sk_test_...`) from the operator portal (Developer settings → API keys)\n3. Run requests in order — variables auto-populate between requests\n\n## Flow\n1. **Pricing Preview** — See guarantee subscription costs + rent fees\n2. **Create Session** — Onboard tenant: guarantee deposit + first rent\n3. **Get Session** — Poll until completed, grab `payment_agreement_id`\n4. **Follow-up Invoices** — Monthly rent invoices on the existing agreement",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"auth": {
@@ -152,7 +152,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"tenant\": {\n        \"email\": \"john.doe@example.com\",\n        \"first_name\": \"John\",\n        \"last_name\": \"Doe\",\n        \"phone\": \"+3725551234\"\n    },\n    \"cover_amount\": 3000.00,\n    \"deposit_mode\": \"deposit_guaranteed\",\n    \"agreement_type\": \"guarantor\",\n    \"first_payment_amount\": 850.00,\n    \"first_payment_description\": \"February 2026 rent\",\n    \"success_url\": \"https://example.com/success\",\n    \"cancel_url\": \"https://example.com/cancel\",\n    \"metadata\": {\n        \"property_id\": \"prop_123\",\n        \"lease_start\": \"2026-03-01\"\n    }\n}"
+							"raw": "{\n    \"tenant\": {\n        \"email\": \"john.doe@example.com\",\n        \"first_name\": \"John\",\n        \"last_name\": \"Doe\",\n        \"phone\": \"+3725551234\"\n    },\n    \"cover_amount\": 3000.00,\n    \"deposit_mode\": \"deposit_guaranteed\",\n    \"agreement_type\": \"guarantor\",\n    \"first_payment_amount\": 850.00,\n    \"first_payment_description\": \"February 2026 rent\",\n    \"success_url\": \"https://example.com/success\",\n    \"cancel_url\": \"https://example.com/cancel\",\n    \"metadata\": {\n        \"property_id\": \"prop_123\"\n    }\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}/gateway/sessions",
@@ -313,6 +313,53 @@
 							"path": ["gateway", "agreements", "{{payment_agreement_id}}"]
 						},
 						"description": "Fetch agreement details including email alias, coverage amount, type, status, and dates.\n\n**Key fields:**\n- `email_alias` — the @casapay.me forwarding address for this agreement\n- `coverage_amount` — deposit/guarantee amount CasaPay covers (null for payment_link)\n- `agreement_type` — ontime, cover, or payment_link\n- `status` — draft, active, terminated, etc."
+					}
+				},
+				{
+					"name": "2b.2 Update Tenancy Dates",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var json = pm.response.json();",
+									"",
+									"pm.test('Dates updated', function() {",
+									"    pm.response.to.have.status(200);",
+									"    pm.expect(json.id).to.be.a('number');",
+									"});",
+									"",
+									"console.log('Period: ' + json.agreement_start + ' -> ' + (json.agreement_end || 'ongoing'));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"agreement_end\": \"2028-02-29\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/gateway/agreements/{{payment_agreement_id}}/dates",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"gateway",
+								"agreements",
+								"{{payment_agreement_id}}",
+								"dates"
+							]
+						},
+						"description": "Update the tenancy dates on an existing agreement.\n\nSend `agreement_start`, `agreement_end`, or both. Omitted fields are left alone; `\"agreement_end\": null` CLEARS a fixed term and makes the tenancy rolling.\n\nA lease extension or a notice period is a PATCH, not a new agreement.\n\nDates only: the tenant, agreement type and cover amount drive the fees, so they are not patchable here.\n\n**Warning:** changing `agreement_start` re-anchors the recurring invoice schedule. Moving it backwards can make periods already elapsed billable.\n\n**Errors:** 404 AGREEMENT_NOT_FOUND, 422 VALIDATION_ERROR (neither date sent, bad date, or end before start)."
 					}
 				}
 			]

@@ -2,7 +2,7 @@
 
 > **For AI Agents & Developers:** This document is a language-agnostic skill guide for securely integrating CasaPay Gateway into any application. It covers the full API, security best practices, and common pitfalls.
 
-> **Version:** 1.12 | **Last Updated:** 2026-10-12
+> **Version:** 1.14 | **Last Updated:** 2026-11-17
 
 ---
 
@@ -103,10 +103,10 @@ CasaPay Gateway is a **Stripe-style hosted checkout** for property/rental paymen
 
 | Environment | API Base URL | Key Prefix | Purpose |
 |-------------|-------------|------------|---------|
-| **Production** | Provided during integration | `sk_live_` | Real payments |
-| **Sandbox** | Provided during integration | `sk_test_` | Testing |
+| **Production** | `https://manage.casapay.com/api/v1` | `sk_live_` | Real payments |
+| **Sandbox** | `https://manage.test.casapay.com/api/v1` | `sk_test_` | Testing |
 
-> **Note:** The exact API base URLs will be provided to you during the integration onboarding process. Store them in environment variables (e.g., `CASAPAY_API_BASE_URL`).
+> **Note:** Store the base URL in an environment variable (e.g., `CASAPAY_API_BASE_URL`). Get the keys for each environment from the CasaPay operator portal (Developer settings → API keys).
 
 ⚠️ **Important:** Sandbox and production use different API keys and URLs. Never use production keys in test environments.
 
@@ -128,7 +128,7 @@ Authorization: Bearer sk_live_YOUR_API_KEY_HERE
 - Keys can be **revoked** — implement key rotation support
 - `last_used_at` is tracked — monitor for unauthorized use
 
-⚠️ **CRITICAL:** API keys and webhook secrets will be provided during the integration onboarding process.
+Create, rotate and revoke API keys yourself in the **CasaPay operator portal** (Developer settings → API keys). A new key is shown **once**, so store it straight away. Rotating keeps the old key working for a grace period (default 24 h), so you can swap keys without downtime.
 
 ---
 
@@ -341,9 +341,9 @@ Content-Type: application/json
 | `amount` | number | ❌* | Legacy: single payment amount (no deposit split) |
 | `currency` | string | ❌ | `EUR` or `GBP` (default: `EUR`) |
 | `description` | string | ❌ | Description shown on checkout page |
-| `document_url` | string | ❌ | URL to a document (contract, etc.) |
+| `document_url` | string | ❌ | URL to your invoice PDF. CasaPay downloads and stores a copy when the session is created and attaches it to the invoice booked when the tenant pays. An unreachable URL does not fail the session, but the invoice then has no PDF. |
 | `invoice_no` | string | ❌ | Your own invoice number (max 50 chars; letters, numbers, spaces and `/ - _ .`). Becomes the invoice number of the invoice booked when the tenant pays. Omit it to get a generated `GWY-XXXXXXXX`. |
-| `reference_number` | string | ❌ | Payment reference (max 35 chars). Copied to the invoice and into the payout description on your bank statement. |
+| `reference_number` | string | ❌ | Bank payment reference (max 35 chars). Copied to the invoice and sent as the structured reference on your payout when it is a valid bank reference (Estonian or RF creditor reference); otherwise left empty. It is not added to the payout description, which reads `<payout ID> invoice <invoice_no> <tenant name>`, so send your invoice number as `invoice_no`. |
 | `verification_required` | bool/null | ❌ | `true`=force, `false`=skip, `null`=entity default |
 | `allowed_payment_methods` | array | ❌ | `["card", "bank_transfer", "open_banking"]` |
 | `success_url` | string | ✅ | Redirect URL after success. `{session_id}` placeholder supported |
@@ -396,6 +396,8 @@ Creates a PaymentAgreement with an email alias **without requiring a payment ses
   "agreement_type": "payment_link",
   "cover_amount": 5000.00,
   "currency": "EUR",
+  "agreement_start": "2026-03-01",
+  "agreement_end": "2027-02-28",
   "description": "Apartment 5B, Tallinn"
 }
 ```
@@ -410,9 +412,69 @@ Creates a PaymentAgreement with an email alias **without requiring a payment ses
 | `tenant.phone` | string | ❌ | Phone (E.164 format) |
 | `tenant.personal_code` | string | ❌ | Personal/ID code |
 | `agreement_type` | string | ✅ | `payment_link`, `ontime`, or `cover` |
+| `agreement_start` | string | ❌ | Tenancy start, `YYYY-MM-DD`. Anchors the invoice schedule. Default: today. Backdating allowed |
+| `agreement_end` | string | ❌ | Fixed-term end, `YYYY-MM-DD`. Omit for a rolling tenancy. Must not precede the start |
 | `cover_amount` | number | ❌ | Guarantee/cover amount. Only for `ontime`/`cover`. Validated against entity `max_cover_amount`. |
 | `currency` | string | ❌ | `EUR` or `GBP` (default: entity currency) |
 | `description` | string | ❌ | Agreement title / description |
+
+#### Tenancy dates — where they belong
+
+`agreement_start` is the tenancy start date and a **first-class column** on the
+agreement. It is returned on every agreement read (see §3).
+
+> **Do not put tenancy dates in `metadata`.** `metadata` is an opaque key-value
+> bag: stored, echoed in webhooks, and **never read by CasaPay**. A
+> `lease_start` key in there has no effect on anything — it will not anchor the
+> invoice schedule, will not appear on an invoice, and cannot be filtered or
+> reported on. An older Postman example showed `metadata.lease_start`, which was
+> only illustrating arbitrary metadata.
+
+It is not cosmetic: `agreement_start` anchors the recurring invoice schedule. A
+backdated date generates catch-up invoices for the periods already elapsed —
+correct for a tenancy that genuinely started then, and the reason backdating is
+allowed rather than refused. Omitted, it defaults to **today**.
+
+Accepted on **every** agreement-create route:
+
+| Endpoint | `agreement_start` / `agreement_end` |
+|---|---|
+| `POST /api/v1/gateway/agreements` (integrator, `sk_live_`) | ✅ |
+| `POST /api/v1/operator/gateway/{entity}/agreements` | ✅ |
+| `POST /api/v1/operator/gateway/{entity}/agreements/batch` | ✅ per row |
+
+Format `YYYY-MM-DD`. Both echoed back in the `201` so you can confirm what was
+stored. `agreement_end` is nullable — omit it for a rolling tenancy — and must
+not fall before `agreement_start`.
+
+#### Changing the dates later
+
+```
+PATCH /api/v1/gateway/agreements/{paymentAgreementId}/dates
+Authorization: Bearer sk_live_xxx
+Content-Type: application/json
+
+{ "agreement_end": "2028-02-29" }
+```
+
+Send either date or both. Omitted fields are untouched; `"agreement_end": null`
+clears a fixed term, turning the tenancy rolling. A lease extension or a notice
+period is a PATCH, not a new agreement.
+
+Narrow by design: the tenant, type and cover amount drive the fees, so they are
+not patchable here.
+
+> ⚠️ Changing `agreement_start` **re-anchors the recurring invoice schedule** —
+> moving it backwards can make elapsed periods billable.
+
+| HTTP | `code` | When |
+|---|---|---|
+| 200 | — | Updated |
+| 404 | `AGREEMENT_NOT_FOUND` | Not your entity's agreement |
+| 422 | `VALIDATION_ERROR` | Neither date sent, bad date, or end before start |
+
+Closing an agreement stamps `agreement_end` with today **only if it is empty**,
+so a date you set survives the close.
 
 #### Agreement Type Behavior
 
@@ -959,7 +1021,7 @@ The webhook payload extends the standard envelope with a `failure` block:
 triggered against a `sk_test_…` session via:
 
 ```bash
-curl -X POST https://api-test.casapay.com/api/v1/gateway/public/sessions/{session_id}/simulator \
+curl -X POST https://manage.test.casapay.com/api/v1/gateway/public/sessions/{session_id}/simulator \
   -H "Content-Type: application/json" \
   -d '{"scenario": "payment_bank_declined"}'
 ```
@@ -1167,9 +1229,9 @@ All communication with CasaPay API MUST be over HTTPS. Reject any non-HTTPS webh
 
 ### 🔴 Rule #7: Key Provisioning
 
-API keys and webhook secrets are:
-- Provisioned by CasaPay during onboarding
-- Rotatable via secure request to CasaPay support
+API keys and webhook secrets are self-service in the **CasaPay operator portal** (Developer settings):
+- **API keys:** create separate `sk_test_` and `sk_live_` keys, rotate with a grace period, revoke.
+- **Webhook endpoints:** register one or more endpoints; each gets its own `whsec_` signing secret, which you can view and rotate there. Secret rotation is immediate, so update your receiver right after rotating.
 
 ---
 
@@ -1552,7 +1614,7 @@ const app = express();
 
 const CASAPAY_API_KEY = process.env.CASAPAY_API_KEY;
 const CASAPAY_WEBHOOK_SECRET = process.env.CASAPAY_WEBHOOK_SECRET;
-const CASAPAY_API_URL = process.env.CASAPAY_API_URL || 'https://api.casapay.com/api/v1/gateway';
+const CASAPAY_API_URL = process.env.CASAPAY_API_URL || 'https://manage.casapay.com/api/v1/gateway';
 
 // ===== CREATE SESSION =====
 app.post('/create-checkout', async (req, res) => {
@@ -1713,7 +1775,7 @@ app = Flask(__name__)
 
 CASAPAY_API_KEY = os.environ['CASAPAY_API_KEY']
 CASAPAY_WEBHOOK_SECRET = os.environ['CASAPAY_WEBHOOK_SECRET']
-CASAPAY_API_URL = os.environ.get('CASAPAY_API_URL', 'https://api.casapay.com/api/v1/gateway')
+CASAPAY_API_URL = os.environ.get('CASAPAY_API_URL', 'https://manage.casapay.com/api/v1/gateway')
 
 
 def verify_webhook_signature(raw_body: bytes, timestamp: str, signature: str) -> bool:
@@ -2165,7 +2227,7 @@ test "success_url_does_not_fulfill_order":
 
 This skill file includes a version check mechanism. AI agents should periodically verify they have the latest version.
 
-**Current Version:** `1.12`
+**Current Version:** `1.14`
 **Version Check URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION`
 **Full Skill URL:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md`
 **Changelog:** `https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/CHANGELOG.md`
@@ -2178,14 +2240,14 @@ When starting a new CasaPay Gateway integration task, or if more than 7 days hav
    ```
    curl -s https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/VERSION
    ```
-2. **Compare** the remote version with the version in this file header (`Version: 1.12`)
+2. **Compare** the remote version with the version in this file header (`Version: 1.14`)
 3. **If newer version exists**, download and replace this file:
    ```
    curl -s -o <path-to-this-file> https://raw.githubusercontent.com/CasaPay/casapay-gateway-skill/main/README.md
    ```
 4. **Notify the developer** that the skill was updated
 
-> The version-check string in step 2 is `Version: 1.12` (matches the file header).
+> The version-check string in step 2 is `Version: 1.14` (matches the file header).
 
 ### For CI/CD: Automated Update Script
 

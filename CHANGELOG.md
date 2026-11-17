@@ -3,6 +3,54 @@
 All notable changes to the public skill + Postman collection are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.14] — 2026-11-17
+
+### Added
+- **Tenancy dates on agreements.** `agreement_start` and `agreement_end` are
+  accepted on every agreement-create route — `POST /agreements` (integrator),
+  the operator equivalent, and the operator batch endpoint — and echoed back in
+  the response. `YYYY-MM-DD`. `agreement_start` defaults to today; backdating
+  is allowed and generates catch-up invoices for elapsed periods.
+  `agreement_end` is optional: omit it for a rolling tenancy. It must not fall
+  before the start.
+- **`PATCH /agreements/{id}/dates`** on both the integrator and operator APIs.
+  Send either date or both; omitted fields are untouched, and
+  `"agreement_end": null` clears a fixed term. A lease extension or a notice
+  period is an update, not a new agreement. Dates only — the tenant, agreement
+  type and cover amount drive the fees, so they are not patchable here.
+
+### Fixed
+- **`agreement_start` was silently dropped by `POST /api/v1/gateway/agreements`.**
+  The integrator endpoint did not validate the field, so a date sent there was
+  discarded and the agreement started today — returning `201` either way. The
+  operator route had accepted it since October. Both now behave the same.
+
+### Changed
+- `metadata` is documented as **stored but never read by CasaPay**. It is
+  returned in webhooks and nothing else: it cannot anchor billing, reach an
+  invoice, or be filtered on. Removed `metadata.lease_start` from the Postman
+  collection, which was only ever illustrating arbitrary metadata and was being
+  read as the supported way to send tenancy dates.
+- Auto-update version bumped to `1.14`.
+
+## [1.13] — 2026-10-13
+
+### Changed
+- **`document_url` on `POST /sessions`** is now your invoice PDF. CasaPay
+  downloads and stores it when the session is created and attaches it to the
+  invoice booked when the tenant pays, the same as on
+  `POST /agreements/{id}/invoice`. An unreachable URL does not fail the
+  session; the invoice then has no PDF.
+- **Key provisioning.** API keys and webhook secrets are self-service in the
+  operator portal (Developer settings). They are no longer described as
+  issued during onboarding or rotated through CasaPay support.
+- **Payout description.** `reference_number` is no longer appended to the
+  payout description as `Ref: …`. The description is
+  `<payout ID> invoice <invoice_no> <tenant name>`; the reference goes only to
+  the structured bank reference field, and only when it is a valid bank
+  reference.
+- Auto-update version bumped to `1.13`.
+
 ## [1.12] — 2026-10-12
 
 ### Added
